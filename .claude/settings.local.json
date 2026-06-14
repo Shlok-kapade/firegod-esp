@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 scripts/embed_web.py)",
+      "Bash(timeout 540 pio run)",
+      "Bash(grep -iB1 -A2 'undefined reference\\\\|ld returned')",
+      "Bash(timeout 120 pio run -t upload)",
+      "Bash(timeout 12 cat /dev/ttyUSB0)",
+      "Bash(stty -F /dev/ttyUSB0 115200 raw -echo)",
+      "Bash(timeout 10 cat /dev/ttyUSB0)",
+      "Bash(timeout 300 pio run)",
+      "Bash(timeout 90 pio run -t upload)"
+    ]
+  }
+}

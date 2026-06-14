@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FireGod-ESP</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">&#9763;</span>
+      <span class="title">FireGod-ESP</span>
+      <span class="ver" id="version">v0.0.0</span>
+    </div>
+    <div class="conn">
+      <span class="dot" id="connDot"></span>
+      <span id="connText">connecting&hellip;</span>
+    </div>
+  </header>
+
+  <section class="statusbar" id="statusbar">
+    <div class="stat"><label>Heap</label><span id="statHeap">&mdash;</span></div>
+    <div class="stat"><label>Uptime</label><span id="statUptime">&mdash;</span></div>
+    <div class="stat"><label>Module</label><span id="statModule">idle</span></div>
+    <div class="stat"><label>State</label><span id="statState">&mdash;</span></div>
+  </section>
+
+  <main class="grid">
+    <aside class="panel controls">
+      <h2>WiFi</h2>
+      <button class="btn" data-cmd="wifi_scan">AP Scan</button>
+
+      <div class="field">
+        <input type="text" id="ssid" placeholder="Target SSID" autocomplete="off">
+        <input type="password" id="pass" placeholder="Password" autocomplete="off">
+      </div>
+      <button class="btn" data-cmd="client_scan" data-needs-creds>Client Scan</button>
+      <button class="btn" data-cmd="arp_scan" data-needs-creds>ARP Scan</button>
+      <button class="btn" data-cmd="sniff">Sniffer (AP ch)</button>
+
+      <h2>Session</h2>
+      <button class="btn ghost" data-cmd="status">Refresh Status</button>
+      <button class="btn danger" data-cmd="stop">STOP</button>
+
+      <div class="counts">
+        <span>Rows: <b id="rowCount">0</b></span>
+        <button class="btn small ghost" id="clearBtn">Clear</button>
+      </div>
+    </aside>
+
+    <section class="panel results">
+      <div class="tabs">
+        <button class="tab active" data-tab="table">Results</button>
+        <button class="tab" data-tab="log">Log</button>
+      </div>
+
+      <div class="tabview" id="view-table">
+        <table id="resultsTable">
+          <thead id="resultsHead"></thead>
+          <tbody id="resultsBody"></tbody>
+        </table>
+        <div class="empty" id="emptyHint">No results yet. Trigger a scan.</div>
+      </div>
+
+      <div class="tabview hidden" id="view-log">
+        <pre id="logPane"></pre>
+      </div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

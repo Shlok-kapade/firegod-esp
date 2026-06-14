@@ -1,0 +1,53 @@
+Chip:           ESP32-D0WD revision v1.0
+Architecture:   Xtensa LX6 dual-core
+Clock:          240MHz
+RAM:            520KB SRAM
+Flash:          4MB (Manufacturer: 5e, Device: 4016)
+Flash voltage:  3.3V
+Crystal:        40MHz
+MAC:            24:6F:28:55:9B:04
+
+WiFi:           802.11 b/g/n 2.4GHz
+                Station + AP + AP+STA modes
+                Raw 802.11 packet injection/sniffer
+
+Bluetooth:      BT Classic + BLE 4.2
+                HID profile support (keyboard/mouse emulation)
+
+GPIO:           34 programmable pins
+SPI:            4x (HSPI on 18/19/23, VSPI on 5/18/19/23)
+I2C:            2x (default SDA=21, SCL=22)
+UART:           3x (UART0 on TX=1, RX=3)
+PWM:            16 channels
+ADC:            18 channels 12-bit
+DAC:            2 channels 8-bit
+Touch sensor:   10 capacitive pins
+
+USB-Serial:     CH340 or CP2102 (via /dev/ttyUSB0)
+Operating V:    3.3V logic, 5V tolerant via VIN
+
+
+
+
+Pin map context for Bruce-style firmware
+Default SPI bus:    SCK=18, MISO=19, MOSI=23
+SD Card CS:         GPIO4
+CC1101 CS:          GPIO22
+IR TX:              GPIO21
+IR RX:              GPIO22
+I2C SDA:            GPIO21
+I2C SCL:            GPIO22
+BLE name:           Keyboard_9b
+RF Freq default:    433.92MHz
+These are exactly what Bruce detected and stored for your MAC — so any firmware you build targeting this chip should use these defaults.
+
+Target chip: ESP32-D0WD rev 1.0
+Dual core Xtensa LX6 @ 240MHz
+4MB flash, 520KB RAM, 40MHz crystal
+WiFi: 802.11 b/g/n 2.4GHz, AP+STA+sniffer+injection
+BLE: 4.2, classic BT, HID support
+Framework: ESP-IDF or Arduino-ESP32
+SPI: SCK=18, MISO=19, MOSI=23
+I2C: SDA=21, SCL=22
+No display, no SD card, no external modules
+Serial: /dev/ttyUSB0 @ 115200 baud

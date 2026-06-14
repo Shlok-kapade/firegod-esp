@@ -1,0 +1,9 @@
+.pio/
+.vscode/
+node_modules/
+build/
+context/firmware/
+*.bin
+*.elf
+*.map
+.DS_Store
