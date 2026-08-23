@@ -10,6 +10,16 @@
 #include "modules/wifi/arp_scanner.h"
 #include "modules/wifi/client_scanner.h"
 #include "modules/wifi/sniffer.h"
+#include "modules/wifi/beacon_spam.h"
+#include "modules/wifi/deauth.h"
+#include "modules/wifi/ssid_clone.h"
+#include "modules/wifi/karma.h"
+#include "modules/wifi/evil_portal.h"
+#include "modules/wifi/mitm.h"
+#include "modules/ble/ble_scan.h"
+#include "modules/ble/ble_spam.h"
+#include "modules/ble/bad_ble.h"
+#include "modules/ble/ble_detect.h"
 #include <esp_wifi.h>
 
 static String inputBuffer = "";
@@ -114,6 +124,16 @@ static void processCommand(const String& cmd) {
         Serial.println("║  scan arp <ssid> <pass> - ARP subnet sweep    ║");
         Serial.println("║  scan clients <ssid> <pass> - Client scan     ║");
         Serial.println("║  sniff [ch]             - Raw 802.11 sniffer  ║");
+        Serial.println("║  beacon [ch] [list]     - Beacon spam         ║");
+        Serial.println("║  deauth <bssid> <ch> [tgt] - Deauth flood     ║");
+        Serial.println("║  clone <ssid> [ch] [wpa2]  - SSID clone       ║");
+        Serial.println("║  karma [ch]             - Karma probe-resp    ║");
+        Serial.println("║  portal [ssid]          - Evil captive portal ║");
+        Serial.println("║  mitm <ssid> <pass> [all|ip] - ARP MITM       ║");
+        Serial.println("║  blescan [secs]         - BLE device scan     ║");
+        Serial.println("║  blespam [type]         - BLE pairing spam     ║");
+        Serial.println("║  bledetect [secs]       - BLE spam detector   ║");
+        Serial.println("║  badble [text]          - BLE HID keyboard    ║");
         Serial.println("║  stop                   - Stop active module  ║");
         Serial.println("║  status                 - System status       ║");
         Serial.println("║  reboot                 - Restart ESP32       ║");
@@ -156,6 +176,126 @@ static void processCommand(const String& cmd) {
         if (fg_launch_module(MOD_WIFI_SNIFFER, nullptr, nullptr, (uint8_t)ch)) {
             Serial.printf("[*] Sniffer started (ch %d). Type 'stop' to end.\n", ch);
         }
+    }
+    else if (c == "beacon" || c.startsWith("beacon ")) {
+        // beacon [ch] [ssid,ssid,...]  (ch 0 = hop 1/6/11; list optional)
+        uint8_t ch = 0; String list;
+        String rest = raw.substring(6); rest.trim();
+        if (rest.length()) {
+            int sp = rest.indexOf(' ');
+            String first = sp < 0 ? rest : rest.substring(0, sp);
+            if (first.toInt() > 0 || first == "0") {
+                ch = (uint8_t)first.toInt();
+                if (sp > 0) { list = rest.substring(sp + 1); list.trim(); }
+            } else { list = rest; }      // no leading channel, whole rest is the list
+        }
+        if (fg_launch_module(MOD_WIFI_BEACON_SPAM, nullptr, nullptr, ch, false,
+                             list.length() ? list.c_str() : nullptr))
+            Serial.printf("[*] Beacon spam started (ch %d). 'stop' to end.\n", ch);
+    }
+    else if (c.startsWith("deauth")) {
+        // deauth <bssid> <ch> [target-mac]
+        String rest = raw.substring(6); rest.trim();
+        String bssid, target; int ch = 0;
+        int sp1 = rest.indexOf(' ');
+        if (sp1 > 0) {
+            bssid = rest.substring(0, sp1);
+            String r2 = rest.substring(sp1 + 1); r2.trim();
+            int sp2 = r2.indexOf(' ');
+            if (sp2 < 0) { ch = r2.toInt(); }
+            else { ch = r2.substring(0, sp2).toInt(); target = r2.substring(sp2 + 1); target.trim(); }
+        }
+        if (bssid.length() == 0 || ch < 1 || ch > 14) {
+            Serial.println("[!] Usage: deauth <bssid> <ch 1-14> [target-mac]");
+            return;
+        }
+        if (fg_launch_module(MOD_WIFI_DEAUTH, bssid.c_str(),
+                             target.length() ? target.c_str() : nullptr, (uint8_t)ch))
+            Serial.printf("[*] Deauth started on %s ch %d. 'stop' to end.\n", bssid.c_str(), ch);
+    }
+    else if (c.startsWith("clone")) {
+        // clone <ssid> [ch] [wpa2]
+        String rest = raw.substring(5); rest.trim();
+        if (rest.length() == 0) { Serial.println("[!] Usage: clone <ssid> [ch] [wpa2]"); return; }
+        uint8_t ch = 0; bool wpa2 = false; String ssid = rest;
+        // strip optional trailing "wpa2"
+        String low = rest; low.toLowerCase();
+        if (low.endsWith(" wpa2")) { wpa2 = true; rest = rest.substring(0, rest.length() - 5); rest.trim(); ssid = rest; }
+        // strip optional trailing channel number
+        int sp = rest.lastIndexOf(' ');
+        if (sp > 0 && rest.substring(sp + 1).toInt() > 0) {
+            ch = (uint8_t)rest.substring(sp + 1).toInt();
+            ssid = rest.substring(0, sp); ssid.trim();
+        }
+        if (fg_launch_module(MOD_WIFI_SSID_CLONE, ssid.c_str(), nullptr, ch, wpa2))
+            Serial.printf("[*] Cloning '%s' (ch %d, %s). 'stop' to end.\n",
+                          ssid.c_str(), ch, wpa2 ? "wpa2" : "open");
+    }
+    else if (c == "karma" || c.startsWith("karma ")) {
+        int ch = 0, sp = c.indexOf(' ');
+        if (sp > 0) ch = c.substring(sp + 1).toInt();
+        if (ch < 0 || ch > 14) { Serial.println("[!] channel must be 0-14"); return; }
+        if (fg_launch_module(MOD_WIFI_KARMA, nullptr, nullptr, (uint8_t)ch))
+            Serial.printf("[*] Karma started (ch %d). 'stop' to end.\n", ch);
+    }
+    else if (c == "portal" || c.startsWith("portal ")) {
+        // portal [ssid]  (default "Free WiFi")
+        String ssid = raw.substring(6); ssid.trim();
+        const char* s = ssid.length() ? ssid.c_str() : "Free WiFi";
+        if (fg_launch_module(MOD_WIFI_EVIL_PORTAL, s, nullptr, 0))
+            Serial.printf("[*] Evil portal '%s' up. 'stop' to end.\n", s);
+    }
+    else if (c == "mitm" || c.startsWith("mitm ")) {
+        // mitm <ssid> <pass> [all|<client-ip>]   (parsed case-preserving)
+        String rest = raw.substring(4); rest.trim();
+        int sp1 = rest.indexOf(' ');
+        if (sp1 < 0) { Serial.println("[!] Usage: mitm <ssid> <pass> [all|ip]"); return; }
+        String ssid = rest.substring(0, sp1);
+        String r2 = rest.substring(sp1 + 1); r2.trim();
+        int sp2 = r2.indexOf(' ');
+        String pass, target = "all";
+        if (sp2 < 0) { pass = r2; }
+        else { pass = r2.substring(0, sp2); target = r2.substring(sp2 + 1); target.trim(); }
+        if (ssid.length() == 0 || pass.length() == 0) {
+            Serial.println("[!] Usage: mitm <ssid> <pass> [all|ip]"); return;
+        }
+        if (fg_launch_module(MOD_WIFI_MITM, ssid.c_str(), pass.c_str(), 0, false, target.c_str()))
+            Serial.printf("[*] MITM on '%s' (target %s). 'stop' to end.\n",
+                          ssid.c_str(), target.c_str());
+    }
+    else if (c == "blescan" || c.startsWith("blescan ")) {
+        // blescan [secs]  (0/omitted = until stop)
+        int secs = 0, sp = c.indexOf(' ');
+        if (sp > 0) secs = c.substring(sp + 1).toInt();
+        if (secs < 0) secs = 0; if (secs > 255) secs = 255;
+        if (fg_launch_module(MOD_BLE_SCAN, nullptr, nullptr, (uint8_t)secs))
+            Serial.printf("[*] BLE scan started (%s). 'stop' to end.\n",
+                          secs ? "timed" : "until stop");
+    }
+    else if (c == "blespam" || c.startsWith("blespam ")) {
+        // blespam [all|apple|microsoft|android]
+        String a = c.substring(7); a.trim();
+        uint8_t mode = 0;
+        if (a == "apple") mode = 1; else if (a == "microsoft" || a == "ms") mode = 2;
+        else if (a == "android") mode = 3;
+        if (fg_launch_module(MOD_BLE_SPAM, nullptr, nullptr, mode))
+            Serial.println("[*] BLE spam started. 'stop' to end.");
+    }
+    else if (c == "bledetect" || c.startsWith("bledetect ")) {
+        // bledetect [secs]  (0/omitted = until stop)
+        int secs = 0, sp = c.indexOf(' ');
+        if (sp > 0) secs = c.substring(sp + 1).toInt();
+        if (secs < 0) secs = 0; if (secs > 255) secs = 255;
+        if (fg_launch_module(MOD_BLE_DETECT, nullptr, nullptr, (uint8_t)secs))
+            Serial.printf("[*] BLE spam detector started (%s). 'stop' to end.\n",
+                          secs ? "timed" : "until stop");
+    }
+    else if (c == "badble" || c.startsWith("badble ")) {
+        // badble [text...]  (typed on connect; default demo string)
+        String txt = raw.substring(6); txt.trim();
+        if (fg_launch_module(MOD_BLE_BAD_BLE, nullptr, nullptr, 0, false,
+                             txt.length() ? txt.c_str() : nullptr))
+            Serial.println("[*] Bad-BLE keyboard advertising. 'stop' to end.");
     }
     else if (c == "stop") {
         g_stopRequested = true;

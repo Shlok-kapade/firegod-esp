@@ -14,7 +14,8 @@ void fg_ws_broadcast(const char* json);
 // serial shell so long-running modules don't block the shell task.
 // Returns false if another module is already running.
 bool fg_launch_module(FGModule mod, const char* ssid = nullptr,
-                      const char* pass = nullptr, uint8_t channel = 0);
+                      const char* pass = nullptr, uint8_t channel = 0,
+                      bool flag = false, const char* list = nullptr);
 
 // Task: drains g_resultQueue and broadcasts via WebSocket
 void fg_ws_sender_task(void* param);

@@ -9,10 +9,16 @@
 
 // ----- RAW 802.11 TX BYPASS (Phase 2) -----
 // Crafted-frame injection (deauth/beacon) needs the sanity check bypassed.
-// On espressif32 6.9.0 the WiFi lib already defines a (non-weak) symbol, so a
-// plain override collides at link time. The raw-TX modules will reintroduce
-// this via the linker-wrap technique (-Wl,--wrap=ieee80211_raw_frame_sanity_check)
-// when Phase 2 lands. Phase 1 scanners don't transmit raw frames.
+// On espressif32 6.9.0 the WiFi lib defines a (non-weak) symbol, so a plain
+// override collides at link time. We instead intercept it with the GNU linker
+// wrap (-Wl,--wrap=ieee80211_raw_frame_sanity_check in platformio.ini): every
+// call to the real symbol is routed here and we always report "valid", which
+// lets esp_wifi_80211_tx() inject arbitrary frames.
+extern "C" int ieee80211_raw_frame_sanity_check(int32_t arg, int32_t arg2, int32_t arg3);
+extern "C" int __wrap_ieee80211_raw_frame_sanity_check(int32_t arg, int32_t arg2, int32_t arg3) {
+    (void)arg; (void)arg2; (void)arg3;
+    return 0;  // 0 == OK; bypasses the length/format gate for raw injection.
+}
 
 void fg_wifi_init() {
     // Ensure WiFi is in a clean state
@@ -106,6 +112,24 @@ bool fg_wifi_connect_sta(const char* ssid, const char* pass, uint32_t timeout_ms
     Serial.printf("[WiFi] Gateway: %s\n", WiFi.gatewayIP().toString().c_str());
     Serial.printf("[WiFi] Subnet: %s\n", WiFi.subnetMask().toString().c_str());
     return true;
+}
+
+int fg_wifi_raw_tx(const uint8_t* frame, int len) {
+    // en_sys_seq=false: let the driver keep our crafted sequence/duration fields.
+    return (int)esp_wifi_80211_tx(WIFI_IF_AP, frame, len, false);
+}
+
+void fg_wifi_enter_tx_mode(uint8_t ch) {
+    // Injection works from AP mode with promiscuous on; this keeps our SoftAP
+    // alive (so the WebUI survives) while letting us pin a channel and TX.
+    if (WiFi.getMode() != WIFI_AP && WiFi.getMode() != WIFI_AP_STA) {
+        WiFi.mode(WIFI_AP);
+        delay(100);
+        WiFi.softAPConfig(FG_AP_IP, FG_AP_GATEWAY, FG_AP_SUBNET);
+        WiFi.softAP(FG_AP_SSID, FG_AP_PASS, FG_AP_CHANNEL, 0, FG_AP_MAX_CONN);
+    }
+    esp_wifi_set_promiscuous(true);
+    if (ch >= 1 && ch <= 14) esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE);
 }
 
 void fg_wifi_disconnect_sta() {

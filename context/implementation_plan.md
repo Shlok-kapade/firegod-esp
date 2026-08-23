@@ -75,6 +75,8 @@ Build and verify one module at a time; each phase ends with a working flash.
   sniffer → beacon spam → SSID clone → deauth → karma → evil portal.
 - **Phase 3 — BLE (NimBLE-Arduino).** `MOD_BLE_SCAN` → `MOD_BLE_SPAM` → `MOD_BLE_BAD_BLE`
   (HID keyboard / Ducky-script injection).
+- **Phase 4 — Always-up dashboard + module chaining (ESP32-only, no new HW).** See §8.
+- **Phase 5 — ESP8266 coprocessor: true concurrent / channel-independent attacks.** See §9.
 
 ## 5. Phase 1 — Detailed Tasks
 **T1 — `src/main.cpp` (unblocks everything).**
@@ -133,3 +135,102 @@ Build and verify one module at a time; each phase ends with a working flash.
 This firmware is for testing networks and devices the operator owns or is explicitly
 authorized to assess. Offensive modules (deauth, beacon spam, karma, evil portal, BLE spam)
 must only be used in that context.
+
+---
+
+## 8. Phase 4 — Always-up dashboard + module chaining (ESP32-only)
+
+### 8.0 The governing constraint (read first)
+One WiFi radio = **one channel, one mode, at a time.** The admin dashboard is served by
+the ESP32 SoftAP. Anything that moves the radio off the AP channel or changes the AP drops
+the operator's browser association. The whole design below is about respecting that.
+
+How each current module affects the link (single radio):
+| Module | Effect on dashboard | Why |
+|---|---|---|
+| AP / ARP / client scan | brief blips | scan/STA-join retunes the radio momentarily |
+| sniffer, karma | **drops if channel ≠ AP ch** | promiscuous + channel hop |
+| beacon (hopping 1/6/11) | **drops** | radio leaves AP channel |
+| beacon/clone/deauth on AP channel | **stays up** | radio never leaves the channel |
+| evil portal | **dashboard SSID disappears** | tears down ESP32-Shell, brings up open AP |
+
+### 8.1 Goal A — Dashboard resilience (keep the WebUI alive)
+1. **Channel-lock policy.** Add a global "lock attacks to AP channel" mode (default ON).
+   When ON, every offensive module is forced to the SoftAP channel (no hopping) so the
+   radio never leaves it → browser never drops. A WS/serial toggle lets the operator opt
+   into "free-roam" (hopping) attacks, with a clear warning that the dashboard will drop
+   until the module stops.
+2. **Heartbeat + already-present auto-reconnect.** `app.js` already reconnects on WS close;
+   add a visible "link lost / reconnecting" banner and a periodic `status` ping so the UI
+   reflects reality. (Cheap, do this regardless.)
+3. **Evil portal carve-out.** Portal is inherently dashboard-hostile on one radio (it *is*
+   the AP). Options: (a) keep it mutually exclusive with the dashboard (current behavior,
+   document it), or (b) move the portal AP onto the ESP8266 in Phase 5 so the ESP32 keeps
+   the admin AP. Recommend (b) long-term.
+
+### 8.2 Goal B — Module chaining (sequential "playbook")
+This is the *achievable-now* meaning of "perform multiple modules": a queue that runs
+modules **one after another**, automatically, without the operator babysitting each step.
+- New concept: a **chain** = ordered list of `{module, args, duration_or_until_stop}` steps.
+- A `fg_chain_task` (Core 1) runs each step under the existing single-module mutex, advances
+  on timeout or step-completion, and aborts the whole chain on `stop`.
+- WS protocol: `{"cmd":"chain","steps":[{"mod":"deauth","bssid":"..","ch":6,"secs":10},
+  {"mod":"portal","ssid":"Free WiFi"}]}`; emit `{"event":"chain_step","i":n,...}` per step.
+- Serial: `chain deauth <bssid> 6 10s ; portal "Free WiFi"` (—`;`-separated steps).
+- Example playbook: `scan → deauth target 10s → clone target → portal`. Classic evil-twin flow.
+- Note: this is still **one module at a time** (sequential). True *parallel* needs §9.
+
+### 8.3 Goal C — Limited same-channel parallelism (optional, ESP32-only)
+If two attacks share the AP channel (e.g. deauth + beacon on ch6), a cooperative
+time-slicer can interleave them in one task (round-robin bursts). Fragile and channel-bound;
+treat as a stretch goal. The robust path to parallelism is the coprocessor (§9).
+
+### 8.4 Concurrency-model change required
+Today: one `g_activeModule` + `g_moduleMutex` (strictly single-module). To support chains
+(and later, lanes) cleanly, generalize to **resource lanes** — at most one module per lane:
+- `LANE_LOCAL_RADIO` — ESP32 WiFi (shared with dashboard AP; channel-locked by default).
+- `LANE_BLE` — ESP32 BLE (coexists with WiFi via the radio's coexistence arbiter).
+- `LANE_COPROC` — ESP8266 radio (Phase 5).
+A chain step occupies its lane; parallel = modules in *different* lanes running at once.
+
+---
+
+## 9. Phase 5 — ESP8266 coprocessor (the real concurrency unlock)
+
+### 9.1 Why
+Gives a **second, fully independent 2.4 GHz radio.** The ESP32 keeps the dashboard parked
+on the AP channel forever while the ESP8266 does channel-hopping RF attacks in parallel.
+Solves "dashboard always up" AND "multiple modules at once" at the same time. The ESP8266
+has well-proven raw deauth/beacon TX capability.
+
+### 9.2 Division of labor
+- **ESP32 (host/brains):** SoftAP + dashboard + WebSocket, all scanners, evil portal
+  (needs HTTP+DNS — stays here), BLE, chain orchestration, and the link to the 8266.
+- **ESP8266 (coprocessor / "RF muscle"):** stateless, fire-and-forget RF-only attacks on
+  arbitrary channels — deauth, beacon spam, probe/SSID floods. No HTTP, no state.
+
+### 9.3 Physical link
+- **UART** is the simplest: ESP32 `Serial2` (GPIO17 TX → 8266 RX, GPIO16 RX ← 8266 TX),
+  **common GND**, both 3.3 V logic so direct-connect is safe (no level shifter). 115200+,
+  framed line protocol. (SPI is an option later if UART throughput limits.)
+- Caveat: the 8266's reliable hardware UART (GPIO1/3) doubles as its USB/flash port, so the
+  link occupies it — fine for a headless coprocessor; flash the 8266 separately when updating.
+
+### 9.4 Link protocol (host ⇄ coproc)
+- Tiny line/JSON protocol over UART, e.g. host→coproc:
+  `{"c":"deauth","bssid":"..","tgt":"..","ch":11}` / `{"c":"beacon","ssids":[..],"ch":0}` /
+  `{"c":"stop"}` / `{"c":"ping"}`; coproc→host: `{"r":"stat","sent":N,"ch":11}` / `{"r":"pong"}`.
+- Host surfaces coproc status into the existing `g_resultQueue` as normal `event`s so the
+  dashboard shows ESP32 and ESP8266 activity in one stream. Heartbeat ping detects an
+  unplugged/crashed 8266.
+
+### 9.5 Two firmwares
+- New build target/dir for the **ESP8266 sketch** (its own `platformio.ini` env or a separate
+  project under `coproc/`). Keep it minimal: UART command loop + raw TX. Document the wiring
+  + flashing steps in context.
+
+### 9.6 Suggested sequencing
+1. Phase 4 first (chaining + resilience) — pure software, no hardware risk, immediate value.
+2. Then 8266 bring-up: blink/echo over UART → `ping/pong` → move **deauth** to the coproc
+   lane as the pilot (simplest RF-only module) → then beacon/probe floods.
+3. Optionally relocate the evil-portal AP to the 8266 so the ESP32 dashboard survives a portal.

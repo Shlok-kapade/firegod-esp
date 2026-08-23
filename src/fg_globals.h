@@ -24,6 +24,8 @@ enum FGModule : uint8_t {
     MOD_BLE_SCAN,
     MOD_BLE_SPAM,
     MOD_BLE_BAD_BLE,
+    MOD_BLE_DETECT,
+    MOD_WIFI_MITM,
 };
 
 // --- Module lifecycle ---

@@ -9,64 +9,216 @@
 <body>
   <header class="topbar">
     <div class="brand">
-      <span class="logo">&#9763;</span>
-      <span class="title">FireGod-ESP</span>
+      <button class="homebtn" data-go="home" title="Home">&#9763;</button>
+      <span class="title">FireGod<span class="dim">-ESP</span></span>
       <span class="ver" id="version">v0.0.0</span>
     </div>
-    <div class="conn">
-      <span class="dot" id="connDot"></span>
-      <span id="connText">connecting&hellip;</span>
+    <div class="topright">
+      <span class="hstat" title="Free heap"><i>&#9650;</i><b id="statHeap">&mdash;</b></span>
+      <span class="hstat" title="Uptime"><i>&#9201;</i><b id="statUptime">&mdash;</b></span>
+      <span class="hstat mod" title="Active module"><b id="statModule">idle</b></span>
+      <button class="btn danger small hidden" id="globalStop" data-cmd="stop">&#9632; STOP</button>
+      <span class="conn"><span class="dot" id="connDot"></span><span id="connText">&hellip;</span></span>
     </div>
   </header>
 
-  <section class="statusbar" id="statusbar">
-    <div class="stat"><label>Heap</label><span id="statHeap">&mdash;</span></div>
-    <div class="stat"><label>Uptime</label><span id="statUptime">&mdash;</span></div>
-    <div class="stat"><label>Module</label><span id="statModule">idle</span></div>
-    <div class="stat"><label>State</label><span id="statState">&mdash;</span></div>
-  </section>
+  <main id="app">
 
-  <main class="grid">
-    <aside class="panel controls">
-      <h2>WiFi</h2>
-      <button class="btn" data-cmd="wifi_scan">AP Scan</button>
-
-      <div class="field">
-        <input type="text" id="ssid" placeholder="Target SSID" autocomplete="off">
-        <input type="password" id="pass" placeholder="Password" autocomplete="off">
+    <!-- ============ HOME ============ -->
+    <section class="view active" id="view-home">
+      <div class="cards">
+        <button class="card" data-go="recon">
+          <span class="cico">&#128246;</span>
+          <span class="ctitle">Recon</span>
+          <span class="cdesc">AP, client &amp; ARP scans, live sniffer</span>
+        </button>
+        <button class="card" data-go="attacks">
+          <span class="cico">&#9889;</span>
+          <span class="ctitle">WiFi Attacks</span>
+          <span class="cdesc">Beacon, clone, karma, deauth, portal</span>
+        </button>
+        <button class="card" data-go="mitm">
+          <span class="cico">&#128225;</span>
+          <span class="ctitle">MITM</span>
+          <span class="cdesc">ARP spoof, relay &amp; sniff HTTP/DNS</span>
+        </button>
+        <button class="card" data-go="ble">
+          <span class="cico">&#128279;</span>
+          <span class="ctitle">BLE</span>
+          <span class="cdesc">Scan, pairing spam, bad-BLE HID</span>
+        </button>
+        <button class="card" data-go="logs">
+          <span class="cico">&#128221;</span>
+          <span class="ctitle">Logs</span>
+          <span class="cdesc">Live event stream</span>
+        </button>
+        <button class="card" data-go="status">
+          <span class="cico">&#128202;</span>
+          <span class="ctitle">Status</span>
+          <span class="cdesc">System health &amp; controls</span>
+        </button>
       </div>
-      <button class="btn" data-cmd="client_scan" data-needs-creds>Client Scan</button>
-      <button class="btn" data-cmd="arp_scan" data-needs-creds>ARP Scan</button>
-      <button class="btn" data-cmd="sniff">Sniffer (AP ch)</button>
+    </section>
 
-      <h2>Session</h2>
-      <button class="btn ghost" data-cmd="status">Refresh Status</button>
-      <button class="btn danger" data-cmd="stop">STOP</button>
-
-      <div class="counts">
-        <span>Rows: <b id="rowCount">0</b></span>
-        <button class="btn small ghost" id="clearBtn">Clear</button>
+    <!-- ============ RECON ============ -->
+    <section class="view" id="view-recon">
+      <div class="viewhead">
+        <button class="back" data-go="home">&#8592;</button>
+        <h2>WiFi Recon</h2>
+        <button class="btn ghost small" data-clear="recon">Clear</button>
       </div>
-    </aside>
-
-    <section class="panel results">
-      <div class="tabs">
-        <button class="tab active" data-tab="table">Results</button>
-        <button class="tab" data-tab="log">Log</button>
+      <div class="toolbody">
+        <aside class="controls">
+          <button class="btn" data-cmd="wifi_scan">AP Scan</button>
+          <div class="field">
+            <input type="text" id="reconSsid" placeholder="Target SSID" autocomplete="off">
+            <input type="password" id="reconPass" placeholder="Password (blank = open)" autocomplete="off">
+          </div>
+          <button class="btn" data-cmd="client_scan">Client Scan</button>
+          <button class="btn" data-cmd="arp_scan">ARP Scan</button>
+          <div class="sep"></div>
+          <div class="field">
+            <input type="number" id="chSniff" placeholder="Sniff channel (0 = AP ch)" min="0" max="14">
+          </div>
+          <button class="btn" data-cmd="sniff">Sniffer</button>
+          <div class="statstrip" id="sniffStat"></div>
+        </aside>
+        <div class="results">
+          <table><thead id="reconHead"></thead><tbody id="reconBody"></tbody></table>
+          <div class="empty" id="reconEmpty">No results yet. Run a scan.</div>
+        </div>
       </div>
+    </section>
 
-      <div class="tabview" id="view-table">
-        <table id="resultsTable">
-          <thead id="resultsHead"></thead>
-          <tbody id="resultsBody"></tbody>
-        </table>
-        <div class="empty" id="emptyHint">No results yet. Trigger a scan.</div>
+    <!-- ============ ATTACKS ============ -->
+    <section class="view" id="view-attacks">
+      <div class="viewhead">
+        <button class="back" data-go="home">&#8592;</button>
+        <h2>WiFi Attacks</h2>
+        <button class="btn ghost small" data-clear="attacks">Clear</button>
       </div>
+      <div class="toolbody">
+        <aside class="controls">
+          <div class="field">
+            <input type="text" id="atkSsid" placeholder="SSID (clone / portal)" autocomplete="off">
+            <input type="text" id="atkCsv" placeholder="Beacon SSIDs (CSV, optional)" autocomplete="off">
+            <input type="number" id="atkCh" placeholder="Channel (0 = AP ch)" min="0" max="14">
+          </div>
+          <button class="btn" data-cmd="beacon_spam">Beacon Spam</button>
+          <label class="chk"><input type="checkbox" id="cloneWpa2"> WPA2 clone</label>
+          <button class="btn" data-cmd="ssid_clone">SSID Clone</button>
+          <button class="btn" data-cmd="karma">Karma</button>
+          <button class="btn" data-cmd="evil_portal">Evil Portal</button>
+          <div class="sep"></div>
+          <div class="field">
+            <input type="text" id="deauthBssid" placeholder="Deauth BSSID (AA:BB:..)" autocomplete="off">
+            <input type="text" id="deauthTarget" placeholder="Target client MAC (optional)" autocomplete="off">
+          </div>
+          <button class="btn danger" data-cmd="deauth">Deauth</button>
+          <div class="statstrip" id="atkStat"></div>
+        </aside>
+        <div class="results">
+          <table><thead id="attacksHead"></thead><tbody id="attacksBody"></tbody></table>
+          <div class="empty" id="attacksEmpty">Portal creds / karma probes appear here.</div>
+        </div>
+      </div>
+    </section>
 
-      <div class="tabview hidden" id="view-log">
+    <!-- ============ MITM ============ -->
+    <section class="view" id="view-mitm">
+      <div class="viewhead">
+        <button class="back" data-go="home">&#8592;</button>
+        <h2>MITM</h2>
+        <button class="btn ghost small" data-clear="mitm">Clear</button>
+      </div>
+      <div class="toolbody">
+        <aside class="controls">
+          <div class="field">
+            <input type="text" id="mitmSsid" placeholder="Network to join (SSID)" autocomplete="off">
+            <input type="password" id="mitmPass" placeholder="Network password" autocomplete="off">
+            <input type="text" id="mitmTarget" placeholder="Target IP (blank = all clients)" autocomplete="off">
+          </div>
+          <button class="btn danger" data-cmd="mitm">Start MITM</button>
+          <div class="statstrip" id="mitmStat"></div>
+          <p class="hint">HTTPS stays encrypted &mdash; you'll see domains &amp; plain-HTTP only. Dashboard may blip while joining.</p>
+        </aside>
+        <div class="results">
+          <table><thead id="mitmHead"></thead><tbody id="mitmBody"></tbody></table>
+          <div class="empty" id="mitmEmpty">Targets &amp; captured HTTP/DNS appear here.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ BLE ============ -->
+    <section class="view" id="view-ble">
+      <div class="viewhead">
+        <button class="back" data-go="home">&#8592;</button>
+        <h2>Bluetooth LE</h2>
+        <button class="btn ghost small" data-clear="ble">Clear</button>
+      </div>
+      <div class="toolbody">
+        <aside class="controls">
+          <div class="field">
+            <input type="number" id="bleSecs" placeholder="Scan / detect secs (0 = until stop)" min="0">
+          </div>
+          <button class="btn" data-cmd="ble_scan">BLE Scan</button>
+          <button class="btn" data-cmd="ble_detect">BLE Spam Detector</button>
+          <div class="sep"></div>
+          <div class="field">
+            <select id="bleMode">
+              <option value="0">Spam: All</option>
+              <option value="1">Spam: Apple</option>
+              <option value="2">Spam: Microsoft</option>
+              <option value="3">Spam: Android</option>
+            </select>
+          </div>
+          <button class="btn" data-cmd="ble_spam">BLE Spam</button>
+          <div class="sep"></div>
+          <div class="field">
+            <input type="text" id="bleText" placeholder="Bad-BLE text (typed on connect)" autocomplete="off">
+          </div>
+          <button class="btn" data-cmd="bad_ble">Bad-BLE HID</button>
+          <div class="statstrip" id="bleStat"></div>
+        </aside>
+        <div class="results">
+          <table><thead id="bleHead"></thead><tbody id="bleBody"></tbody></table>
+          <div class="empty" id="bleEmpty">Discovered BLE devices appear here.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ LOGS ============ -->
+    <section class="view" id="view-logs">
+      <div class="viewhead">
+        <button class="back" data-go="home">&#8592;</button>
+        <h2>Event Log</h2>
+        <button class="btn ghost small" id="clearLog">Clear</button>
+      </div>
+      <div class="results logwrap">
         <pre id="logPane"></pre>
       </div>
     </section>
+
+    <!-- ============ STATUS ============ -->
+    <section class="view" id="view-status">
+      <div class="viewhead">
+        <button class="back" data-go="home">&#8592;</button>
+        <h2>System Status</h2>
+        <button class="btn ghost small" data-cmd="status">Refresh</button>
+      </div>
+      <div class="statusgrid">
+        <div class="bigstat"><label>Free Heap</label><span id="bigHeap">&mdash;</span></div>
+        <div class="bigstat"><label>Uptime</label><span id="bigUptime">&mdash;</span></div>
+        <div class="bigstat"><label>Active Module</label><span id="bigModule">idle</span></div>
+        <div class="bigstat"><label>State</label><span id="bigState">&mdash;</span></div>
+        <div class="bigstat"><label>Firmware</label><span id="bigVer">&mdash;</span></div>
+        <div class="bigstat"><label>Link</label><span id="bigConn">&mdash;</span></div>
+      </div>
+      <div class="statusactions">
+        <button class="btn danger" data-cmd="stop">&#9632; Stop Active Module</button>
+      </div>
+    </section>
+
   </main>
 
   <script src="/app.js"></script>

